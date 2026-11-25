@@ -2,8 +2,16 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 // Mirrors Django's UnicodeUsernameValidator: Unicode letters, digits and @ . + - _
 const USERNAME_RE = /^[\p{L}\p{N}_.@+-]+$/u
 
-/** Same normalisation as Django's `AbstractBaseUser.normalize_username`. */
-export const normalizeUsername = (value) => String(value ?? '').trim().normalize('NFKC')
+/**
+ * The spelling to submit. Django validates the username as typed and NFKC-normalises it afterwards,
+ * so keep it as typed when valid (e.g. क़लम); otherwise try its NFKC form (e.g. decomposed José).
+ */
+export const normalizeUsername = (value) => {
+  const raw = String(value ?? '').trim()
+  if (USERNAME_RE.test(raw)) return raw
+  const normalized = raw.normalize('NFKC')
+  return USERNAME_RE.test(normalized) ? normalized : raw
+}
 
 export const validators = {
   required: (value, label = 'This field') => (String(value ?? '').trim() ? '' : `${label} is required.`),

@@ -2,14 +2,20 @@ from unittest import mock
 
 from datetime import timedelta
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.auth.tokens import default_token_generator
+from django.core import mail
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.utils import timezone
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
+from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from apps.core.testing import IsolatedAPITestCase
 
@@ -97,6 +103,20 @@ class RegisterTests(IsolatedAPITestCase):
         )
         self.assertEqual(response.status_code, 200, response.content)
 
+    def test_duplicate_username(self):
+        User.objects.create_user("ada", "other@example.com", PASSWORD)
+        response = self.client.post(self.url, self.payload(), format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("username", response.json()["error"]["fields"])
+
+    def test_register_sets_httponly_refresh_cookie(self):
+        response = self.client.post(self.url, self.payload(), format="json")
+        cookie = response.cookies[settings.AUTH_REFRESH_COOKIE["NAME"]]
+        self.assertEqual(cookie.value, response.json()["refresh"])
+        self.assertTrue(cookie["httponly"])
+        self.assertEqual(cookie["path"], "/api/v1/auth/")
+        self.assertEqual(cookie["samesite"], "Strict")
+
     def test_password_mismatch(self):
         response = self.client.post(self.url, self.payload(password_confirm="different-Passw0rd"), format="json")
         self.assertEqual(response.status_code, 400)
@@ -174,6 +194,50 @@ class LoginRefreshLogoutTests(IsolatedAPITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
         response = self.client.post(reverse("auth-logout"), {"refresh": "garbage"}, format="json")
         self.assertEqual(response.status_code, 400)
+
+    def test_refresh_using_cookie_only(self):
+        self.login("ada")
+        response = self.client.post(reverse("auth-refresh"), {}, format="json")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertIn("access", response.json())
+        name = settings.AUTH_REFRESH_COOKIE["NAME"]
+        self.assertEqual(response.cookies[name].value, response.json()["refresh"])
+
+    def test_refresh_without_token(self):
+        response = self.client.post(reverse("auth-refresh"), {}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("refresh", response.json()["error"]["fields"])
+
+    def test_expired_refresh_token_rejected_and_cookie_cleared(self):
+        token = RefreshToken.for_user(self.user)
+        token.set_exp(lifetime=-timedelta(seconds=1))
+        response = self.client.post(reverse("auth-refresh"), {"refresh": str(token)}, format="json")
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["error"]["code"], "token_not_valid")
+        self.assertEqual(response.cookies[settings.AUTH_REFRESH_COOKIE["NAME"]].value, "")
+
+    def test_expired_access_token_rejected(self):
+        token = AccessToken.for_user(self.user)
+        token.set_exp(lifetime=-timedelta(seconds=1))
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+        response = self.client.get(reverse("auth-me"))
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["error"]["code"], "token_not_valid")
+
+    def test_access_token_lifetime_is_15_minutes(self):
+        access = AccessToken(self.login("ada").json()["access"])
+        self.assertEqual(access["exp"] - access["iat"], 15 * 60)
+
+    def test_logout_using_cookie_clears_it(self):
+        body = self.login("ada").json()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {body['access']}")
+        response = self.client.post(reverse("auth-logout"), {}, format="json")
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.cookies[settings.AUTH_REFRESH_COOKIE["NAME"]].value, "")
+        self.assertTrue(BlacklistedToken.objects.filter(token__token=body["refresh"]).exists())
+
+    def test_login_response_never_contains_password(self):
+        self.assertNotIn("password", self.login("ada").json()["user"])
 
     def test_username_containing_at_wins_over_other_users_email(self):
         User.objects.create_user("ada@example.com", "someone@example.com", "Other-pass-123!")
@@ -307,3 +371,102 @@ class ChangePasswordTests(IsolatedAPITestCase):
 
     def test_same_password_rejected(self):
         self.assertEqual(self.change(new=PASSWORD).status_code, 400)
+
+
+class PasswordResetTests(IsolatedAPITestCase):
+    request_url = reverse("auth-password-reset")
+    confirm_url = reverse("auth-password-reset-confirm")
+    NEW = "Brand-new-Passw0rd"
+
+    def setUp(self):
+        super().setUp()
+        self.user = User.objects.create_user("ada", "ada@example.com", PASSWORD)
+
+    def link_parts(self):
+        return urlsafe_base64_encode(force_bytes(self.user.pk)), default_token_generator.make_token(self.user)
+
+    def confirm(self, uid, token, new=NEW, confirm=None):
+        return self.client.post(
+            self.confirm_url,
+            {"uid": uid, "token": token, "new_password": new, "new_password_confirm": confirm or new},
+            format="json",
+        )
+
+    def test_request_sends_email_with_fragment_link(self):
+        response = self.client.post(self.request_url, {"email": "ADA@example.com"}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["ada@example.com"])
+        self.assertIn(f"{settings.FRONTEND_URL}/reset-password#uid=", mail.outbox[0].body)
+
+    def test_unknown_email_gets_same_response_and_no_email(self):
+        known = self.client.post(self.request_url, {"email": "ada@example.com"}, format="json").json()
+        unknown = self.client.post(self.request_url, {"email": "nobody@example.com"}, format="json")
+        self.assertEqual(unknown.status_code, 200)
+        self.assertEqual(unknown.json(), known)
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_invalid_email_format(self):
+        self.assertEqual(self.client.post(self.request_url, {"email": "nope"}, format="json").status_code, 400)
+
+    def test_confirm_resets_password_and_revokes_sessions(self):
+        old_refresh = self.client.post(
+            reverse("auth-login"), {"username": "ada", "password": PASSWORD}, format="json"
+        ).json()["refresh"]
+        self.user.refresh_from_db()  # login updates last_login, which is part of the reset token hash
+        response = self.confirm(*self.link_parts())
+        self.assertEqual(response.status_code, 200, response.content)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password(self.NEW))
+        refresh = self.client.post(reverse("auth-refresh"), {"refresh": old_refresh}, format="json")
+        self.assertEqual(refresh.status_code, 401)
+        login = self.client.post(reverse("auth-login"), {"username": "ada", "password": self.NEW}, format="json")
+        self.assertEqual(login.status_code, 200)
+
+    def test_link_is_single_use(self):
+        uid, token = self.link_parts()
+        self.assertEqual(self.confirm(uid, token).status_code, 200)
+        again = self.confirm(uid, token, new="Another-Passw0rd-2")
+        self.assertEqual(again.status_code, 400)
+        self.assertIn("token", again.json()["error"]["fields"])
+
+    def test_invalid_uid_or_token(self):
+        uid, _ = self.link_parts()
+        self.assertEqual(self.confirm(uid, "bad-token").status_code, 400)
+        self.assertEqual(self.confirm("!!!", "bad-token").status_code, 400)
+
+    def test_expired_link(self):
+        uid, token = self.link_parts()
+        with self.settings(PASSWORD_RESET_TIMEOUT=-1):
+            self.assertEqual(self.confirm(uid, token).status_code, 400)
+
+    def test_confirm_validates_new_password(self):
+        uid, token = self.link_parts()
+        self.assertEqual(self.confirm(uid, token, confirm="Different-Passw0rd").status_code, 400)
+        self.assertEqual(self.confirm(uid, token, new="password").status_code, 400)
+
+    def test_inactive_user_gets_no_email(self):
+        self.user.is_active = False
+        self.user.save()
+        self.client.post(self.request_url, {"email": "ada@example.com"}, format="json")
+        self.assertEqual(len(mail.outbox), 0)
+
+
+class UnauthorizedAccessTests(IsolatedAPITestCase):
+    def test_private_endpoints_require_auth(self):
+        for name, method in [
+            ("auth-me", "get"),
+            ("auth-me", "patch"),
+            ("auth-logout", "post"),
+            ("auth-password-change", "post"),
+        ]:
+            with self.subTest(name=name, method=method):
+                response = getattr(self.client, method)(reverse(name), {}, format="json")
+                self.assertEqual(response.status_code, 401)
+                self.assertEqual(response.json()["error"]["code"], "not_authenticated")
+
+    def test_garbage_bearer_token(self):
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer not-a-jwt")
+        response = self.client.get(reverse("auth-me"))
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["error"]["code"], "token_not_valid")

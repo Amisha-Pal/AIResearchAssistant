@@ -3,6 +3,8 @@ from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
+from .services.password_reset import get_user_for_reset
+
 User = get_user_model()
 
 MAX_INTERESTS = 20
@@ -113,7 +115,41 @@ class LoginSerializer(TokenObtainPairSerializer):
 
 
 class LogoutSerializer(serializers.Serializer):
+    refresh = serializers.CharField(required=False, help_text="Optional when the refresh cookie is sent.")
+
+
+class RefreshRequestSerializer(serializers.Serializer):
+    refresh = serializers.CharField(required=False, help_text="Optional when the refresh cookie is sent.")
+
+
+class AccessTokenSerializer(serializers.Serializer):
+    access = serializers.CharField()
     refresh = serializers.CharField()
+
+
+class DetailSerializer(serializers.Serializer):
+    detail = serializers.CharField()
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    uid = serializers.CharField()
+    token = serializers.CharField()
+    new_password = serializers.CharField(write_only=True, style={"input_type": "password"})
+    new_password_confirm = serializers.CharField(write_only=True, style={"input_type": "password"})
+
+    def validate(self, attrs):
+        user = get_user_for_reset(attrs["uid"], attrs["token"])
+        if user is None:
+            raise serializers.ValidationError({"token": "This reset link is invalid or has expired."})
+        if attrs["new_password"] != attrs["new_password_confirm"]:
+            raise serializers.ValidationError({"new_password_confirm": "Passwords do not match."})
+        validate_password(attrs["new_password"], user=user)
+        attrs["user"] = user
+        return attrs
 
 
 class ChangePasswordSerializer(serializers.Serializer):

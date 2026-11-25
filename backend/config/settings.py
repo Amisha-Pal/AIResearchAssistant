@@ -174,13 +174,40 @@ REST_FRAMEWORK = {
 }
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=env_int("JWT_ACCESS_MINUTES", 30)),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=env_int("JWT_ACCESS_MINUTES", 15)),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=env_int("JWT_REFRESH_DAYS", 7)),
     "AUTH_HEADER_TYPES": ("Bearer",),
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
     "UPDATE_LAST_LOGIN": True,
 }
+
+# The browser app keeps the access token in memory only; the refresh token lives in this
+# httpOnly cookie, scoped to the auth endpoints so it is never sent with other requests.
+AUTH_REFRESH_COOKIE = {
+    "NAME": env_str("AUTH_REFRESH_COOKIE_NAME", "refresh_token"),
+    "PATH": "/api/v1/auth/",
+    "SECURE": env_bool("AUTH_REFRESH_COOKIE_SECURE", not DEBUG),
+    "SAMESITE": env_str("AUTH_REFRESH_COOKIE_SAMESITE", "Strict"),
+}
+
+# ---------------------------------------------------------------------------
+# Email and password reset
+# ---------------------------------------------------------------------------
+
+# Development default prints emails to the runserver console. Set SMTP values in .env to send real mail.
+EMAIL_BACKEND = env_str("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
+EMAIL_HOST = env_str("EMAIL_HOST", "localhost")
+EMAIL_PORT = env_int("EMAIL_PORT", 587)
+EMAIL_HOST_USER = env_str("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = env_str("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
+EMAIL_TIMEOUT = env_int("EMAIL_TIMEOUT", 10)
+DEFAULT_FROM_EMAIL = env_str("DEFAULT_FROM_EMAIL", "AI Research Assistant <no-reply@localhost>")
+
+# Base URL of the React app, used to build password-reset links.
+FRONTEND_URL = env_str("FRONTEND_URL", "http://localhost:5173")
+PASSWORD_RESET_TIMEOUT = env_int("PASSWORD_RESET_TIMEOUT_SECONDS", 60 * 60)
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "AI Research Assistant API",
@@ -197,7 +224,8 @@ SPECTACULAR_SETTINGS = {
 CORS_ALLOWED_ORIGINS = env_list(
     "CORS_ALLOWED_ORIGINS", ["http://localhost:5173", "http://127.0.0.1:5173"]
 )
-CORS_ALLOW_CREDENTIALS = False
+# Credentials are needed for the httpOnly refresh cookie; origins are an explicit allow-list.
+CORS_ALLOW_CREDENTIALS = True
 
 # ---------------------------------------------------------------------------
 # Static, media and uploads

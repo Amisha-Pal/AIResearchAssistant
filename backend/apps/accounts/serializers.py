@@ -1,9 +1,11 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 
 from .services.password_reset import get_user_for_reset
+from .services.tokens import token_matches_password
 
 User = get_user_model()
 
@@ -112,6 +114,17 @@ class LoginSerializer(TokenObtainPairSerializer):
         data = super().validate(attrs)
         data["user"] = UserSerializer(self.user).data
         return data
+
+
+class SessionTokenRefreshSerializer(TokenRefreshSerializer):
+    """Rejects refresh tokens issued before the user's current password was set."""
+
+    def validate(self, attrs):
+        refresh = self.token_class(attrs["refresh"])
+        user = User.objects.filter(pk=refresh.get("user_id")).first()
+        if user is None or not token_matches_password(refresh, user):
+            raise TokenError("Token has been revoked.")
+        return super().validate(attrs)
 
 
 class LogoutSerializer(serializers.Serializer):

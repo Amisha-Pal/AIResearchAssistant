@@ -349,9 +349,15 @@ class ChangePasswordTests(IsolatedAPITestCase):
     def test_password_change_revokes_old_access_tokens(self):
         response = self.change()
         self.assertEqual(response.status_code, 200, response.content)
-        # Simulate the old access token having been issued strictly before the change.
-        User.objects.filter(pk=self.user.pk).update(tokens_valid_after=timezone.now() + timedelta(seconds=5))
         old = self.client.get(reverse("auth-me"))
+        self.assertEqual(old.status_code, 401)
+        self.assertEqual(old.json()["error"]["code"], "password_changed")
+
+    def test_password_set_outside_the_api_revokes_access_and_refresh_tokens(self):
+        self.user.set_password("Admin-set-Passw0rd")
+        self.user.save()
+        self.assertEqual(self.client.get(reverse("auth-me")).status_code, 401)
+        old = self.client.post(reverse("auth-refresh"), {"refresh": self.tokens["refresh"]}, format="json")
         self.assertEqual(old.status_code, 401)
         self.assertEqual(old.json()["error"]["code"], "token_not_valid")
 

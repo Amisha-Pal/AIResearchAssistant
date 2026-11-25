@@ -19,6 +19,7 @@ from .serializers import (
     PasswordResetRequestSerializer,
     RefreshRequestSerializer,
     RegisterSerializer,
+    SessionTokenRefreshSerializer,
     TokenPairSerializer,
     UserSerializer,
 )
@@ -76,6 +77,7 @@ class RefreshView(AuthThrottleMixin, TokenRefreshView):
     """Rotate the refresh token (from the body or the httpOnly cookie) and return a new access token."""
 
     authentication_classes = []
+    serializer_class = SessionTokenRefreshSerializer
 
     def post(self, request, *args, **kwargs):
         refresh = get_refresh_from_request(request)
@@ -134,7 +136,7 @@ class ChangePasswordView(AuthThrottleMixin, APIView):
         serializer.is_valid(raise_exception=True)
         user = request.user
         user.set_password(serializer.validated_data["new_password"])
-        user.save(update_fields=["password", "tokens_valid_after"])
+        user.save(update_fields=["password"])
         revoke_all_refresh_tokens(user)
         return _session_response(user)
 
@@ -165,7 +167,7 @@ class PasswordResetConfirmView(AuthThrottleMixin, APIView):
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data["user"]
         user.set_password(serializer.validated_data["new_password"])
-        user.save(update_fields=["password", "tokens_valid_after"])
+        user.save(update_fields=["password"])
         revoke_all_refresh_tokens(user)
         response = Response({"detail": "Your password has been reset. You can now log in."})
         return clear_refresh_cookie(response)

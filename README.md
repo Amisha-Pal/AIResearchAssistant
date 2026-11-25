@@ -28,7 +28,7 @@ cp backend/.env.example backend/.env          # Windows: copy backend\.env.examp
 python -c "import secrets; print(secrets.token_urlsafe(50))"   # paste into DJANGO_SECRET_KEY
 ```
 
-Set `POSTGRES_PASSWORD` (and anything else you need) in `backend/.env`. The `.env` file is git-ignored; never commit it.
+Set `POSTGRES_PASSWORD` (and anything else you need) in `backend/.env`. See [Auth-related environment variables](#auth-related-environment-variables-backendenv) for JWT, cookie and email settings. The `.env` file is git-ignored; never commit it.
 
 ## 2. Start PostgreSQL and Redis
 
@@ -100,29 +100,147 @@ npm run dev                  # http://localhost:5173 (proxies /api to http://loc
 | `http://localhost:8000/api/docs/` | Swagger UI (OpenAPI schema at `/api/schema/`) |
 | `http://localhost:8000/admin/` | Django admin |
 
-## API overview (v1)
+## Authentication
 
-All endpoints except register, login, refresh and health need `Authorization: Bearer <access token>`.
-Errors always use `{"error": {"status", "code", "message", "fields"?}}`.
+### How sessions work
 
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| POST | `/api/v1/auth/register/` | Create an account; returns `access`, `refresh`, `user` |
-| POST | `/api/v1/auth/login/` | Log in with username **or** email |
-| POST | `/api/v1/auth/refresh/` | Rotate the refresh token (old one is blacklisted) |
-| POST | `/api/v1/auth/logout/` | Blacklist the given refresh token |
-| GET/PATCH | `/api/v1/auth/me/` | View or edit profile (affiliation, bio, research interests) |
-| POST | `/api/v1/auth/password/change/` | Change password; revokes all other sessions and returns new tokens |
-| GET/POST | `/api/v1/projects/` | List (`?search=`, `?status=`, `?ordering=`, `?page=`) or create research projects |
-| GET/PATCH/DELETE | `/api/v1/projects/<id>/` | Manage one of your own projects |
+- **Access token** (JWT, 15 minutes): sent as `Authorization: Bearer <access>`. The web app keeps it **in memory only**, never in `localStorage` or in URLs.
+- **Refresh token** (JWT, 7 days): set by the backend as an **httpOnly, SameSite=Strict** cookie scoped to `/api/v1/auth/` (and `Secure` when `DJANGO_DEBUG=False`). It is also returned in the JSON body for non-browser API clients.
+- Every refresh **rotates** the refresh token and blacklists the old one. Logout blacklists it and clears the cookie.
+- Changing or resetting the password **revokes every session**: outstanding refresh tokens are blacklisted, and access tokens issued before the change are rejected.
+- The frontend Axios client (`frontend/src/api/client.js`) retries a request once after a `401` by calling `/auth/refresh/`. If the refresh fails, the user is sent to the login page with a "session expired" message. On page reload the session is restored from the cookie.
+- Auth endpoints are rate limited (`API_THROTTLE_AUTH`, default `10/min` per client IP).
 
-Auth endpoints are rate limited (`API_THROTTLE_AUTH`, default `10/min`).
+### Endpoints
+
+All errors use one envelope: `{"error": {"status", "code", "message", "fields"?}}`.
+
+| Method | Endpoint | Auth | Purpose |
+|--------|----------|------|---------|
+| POST | `/api/v1/auth/register/` | – | Create an account, returns tokens and user (201) |
+| POST | `/api/v1/auth/login/` | – | Log in with username **or** email |
+| POST | `/api/v1/auth/refresh/` | cookie or body | Rotate the refresh token, returns a new access token |
+| POST | `/api/v1/auth/logout/` | Bearer | Blacklist the refresh token (cookie or body), 204 |
+| GET / PATCH | `/api/v1/auth/me/` | Bearer | View or edit profile (`first_name`, `last_name`, `email`, `affiliation`, `bio`, `research_interests`) |
+| POST | `/api/v1/auth/password/change/` | Bearer | Change password, revokes other sessions, returns new tokens |
+| POST | `/api/v1/auth/password/reset/` | – | Email a single-use reset link (same response whether or not the email exists) |
+| POST | `/api/v1/auth/password/reset/confirm/` | – | Set a new password from the link's `uid` + `token` |
+| GET / POST | `/api/v1/projects/` | Bearer | List (`?search=`, `?status=`, `?ordering=`, `?page=`) or create your research projects |
+| GET / PATCH / DELETE | `/api/v1/projects/<id>/` | Bearer | Manage one of your own projects (other users' projects return 404) |
+
+### Examples
+
+```http
+POST /api/v1/auth/register/
+{"username": "ada", "email": "ada@example.com", "password": "s3cure-Passw0rd!", "password_confirm": "s3cure-Passw0rd!",
+ "first_name": "Ada", "last_name": "Lovelace"}
+
+201 Created            Set-Cookie: refresh_token=...; HttpOnly; Path=/api/v1/auth/; SameSite=Strict
+{"access": "eyJ...", "refresh": "eyJ...",
+ "user": {"id": 1, "username": "ada", "email": "ada@example.com", "first_name": "Ada", "last_name": "Lovelace",
+          "affiliation": "", "bio": "", "research_interests": [], "date_joined": "...", "last_login": null}}
+```
+
+```http
+POST /api/v1/auth/login/
+{"username": "ada@example.com", "password": "s3cure-Passw0rd!"}
+
+200 OK   {"access": "...", "refresh": "...", "user": {...}}
+401      {"error": {"status": 401, "code": "no_active_account", "message": "Invalid username/email or password."}}
+```
+
+```http
+POST /api/v1/auth/register/        (duplicate email)
+400 {"error": {"status": 400, "code": "validation_error", "message": "A user with this email already exists.",
+               "fields": {"email": ["A user with this email already exists."]}}}
+```
+
+```http
+POST /api/v1/auth/refresh/         (body {} with the cookie, or {"refresh": "..."})
+200 {"access": "...", "refresh": "..."}
+401 {"error": {"status": 401, "code": "token_not_valid", "message": "Token is blacklisted"}}
+```
+
+```http
+GET /api/v1/auth/me/               (expired or missing access token)
+401 {"error": {"status": 401, "code": "token_not_valid", "message": "Given token not valid for any token type"}}
+401 {"error": {"status": 401, "code": "not_authenticated", "message": "Authentication credentials were not provided."}}
+```
+
+```http
+PATCH /api/v1/auth/me/
+{"affiliation": "Analytical Engine Lab", "research_interests": ["NLP", "RAG"]}
+200 {"id": 1, "username": "ada", ..., "affiliation": "Analytical Engine Lab", "research_interests": ["NLP", "RAG"]}
+```
+
+```http
+POST /api/v1/auth/password/change/
+{"current_password": "...", "new_password": "...", "new_password_confirm": "..."}
+200 {"access": "...", "refresh": "...", "user": {...}}
+```
+
+```http
+POST /api/v1/auth/password/reset/
+{"email": "ada@example.com"}
+200 {"detail": "If an account exists for that email, a password reset link has been sent."}
+
+POST /api/v1/auth/password/reset/confirm/
+{"uid": "MQ", "token": "c2x1f0-...", "new_password": "...", "new_password_confirm": "..."}
+200 {"detail": "Your password has been reset. You can now log in."}
+400 {"error": {..., "fields": {"token": ["This reset link is invalid or has expired."]}}}
+```
+
+### Password reset email
+
+The link looks like `FRONTEND_URL/reset-password#uid=...&token=...`. The values are in the URL **fragment**, so browsers never send them to a server or in a `Referer` header, and the page removes them from the address bar on load. Links expire after `PASSWORD_RESET_TIMEOUT_SECONDS` (1 hour) and stop working once the password changes.
+
+In development the email is printed in the `runserver` terminal (console backend). To send real mail, set the SMTP variables below. Any SMTP provider works, including a free Gmail app password.
+
+### Auth-related environment variables (`backend/.env`)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `JWT_ACCESS_MINUTES` | `15` | Access token lifetime |
+| `JWT_REFRESH_DAYS` | `7` | Refresh token and cookie lifetime |
+| `AUTH_REFRESH_COOKIE_NAME` | `refresh_token` | Cookie name |
+| `AUTH_REFRESH_COOKIE_SAMESITE` | `Strict` | Use `None` (with HTTPS) only if frontend and API are on different sites |
+| `AUTH_REFRESH_COOKIE_SECURE` | `not DEBUG` | Send cookie over HTTPS only |
+| `API_THROTTLE_AUTH` | `10/min` | Rate limit for login, register, refresh, password endpoints |
+| `API_NUM_PROXIES` | `0` | Trusted reverse proxies in front of Django (for client IP in throttling) |
+| `EMAIL_BACKEND` | console | `django.core.mail.backends.smtp.EmailBackend` for real mail |
+| `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS` | – | SMTP settings |
+| `DEFAULT_FROM_EMAIL` | `AI Research Assistant <no-reply@localhost>` | Sender address |
+| `FRONTEND_URL` | `http://localhost:5173` | Base URL used in reset links |
+| `PASSWORD_RESET_TIMEOUT_SECONDS` | `3600` | Reset link lifetime |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,...` | Origins allowed to call the API with credentials |
+
+Frontend (`frontend/.env`): `VITE_API_BASE_URL` (leave empty to use the Vite proxy, recommended so the cookie stays same-site) and `VITE_BACKEND_URL` (proxy target). Never put secrets in `VITE_*` variables; they are bundled into the browser app.
+
+### Web app pages
+
+| Route | Access | Page |
+|-------|--------|------|
+| `/login` | logged-out only | Login with username or email |
+| `/signup` | logged-out only | Registration with client- and server-side validation |
+| `/forgot-password` | logged-out only | Request a reset email |
+| `/reset-password` | anyone with a link | Choose a new password |
+| `/dashboard` | logged-in | Account summary and your research projects |
+| `/profile` | logged-in | Edit profile and change password |
+
+Logged-out users who open a private page are redirected to `/login` and returned to that page after logging in. Logged-in users who open login or signup are redirected to `/dashboard`.
 
 ## Tests and checks
 
 ```bash
-cd backend && python manage.py test          # needs PostgreSQL; the DB user needs CREATEDB
-cd frontend && npm run lint && npm run build
+cd backend
+python manage.py test                       # all tests (needs PostgreSQL; the DB user needs CREATEDB)
+python manage.py test apps.accounts         # authentication tests only
+python manage.py makemigrations --check --dry-run
+python manage.py spectacular --validate --fail-on-warn --file schema.yml
+
+cd ../frontend
+npm run lint
+npm run build
 ```
 
 ## Hardware notes

@@ -236,6 +236,12 @@ class LoginRefreshLogoutTests(IsolatedAPITestCase):
         self.assertEqual(response.cookies[settings.AUTH_REFRESH_COOKIE["NAME"]].value, "")
         self.assertTrue(BlacklistedToken.objects.filter(token__token=body["refresh"]).exists())
 
+    def test_form_encoded_login_rejected(self):
+        # Cross-site HTML forms cannot send JSON; refusing other bodies blocks login CSRF.
+        response = self.client.post(reverse("auth-login"), {"username": "ada", "password": PASSWORD})
+        self.assertEqual(response.status_code, 415)
+        self.assertNotIn(settings.AUTH_REFRESH_COOKIE["NAME"], response.cookies)
+
     def test_login_response_never_contains_password(self):
         self.assertNotIn("password", self.login("ada").json()["user"])
 

@@ -3,6 +3,7 @@ from django.contrib.auth.tokens import default_token_generator
 from django.db import transaction
 from drf_spectacular.utils import extend_schema
 from rest_framework import generics, serializers, status
+from rest_framework.parsers import JSONParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
@@ -33,6 +34,9 @@ User = get_user_model()
 
 
 class AuthThrottleMixin:
+    """Rate-limited, JSON-only auth endpoint. Cross-site HTML forms cannot send JSON, which blocks login CSRF."""
+
+    parser_classes = [JSONParser]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "auth"
 
@@ -101,6 +105,7 @@ class RefreshView(AuthThrottleMixin, TokenRefreshView):
 class LogoutView(APIView):
     """Revoke the refresh token (body or cookie) and clear the cookie. The access token expires on its own."""
 
+    parser_classes = [JSONParser]
     permission_classes = [IsAuthenticated]
 
     def post(self, request):

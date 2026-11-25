@@ -82,7 +82,7 @@ Folders marked with a later phase are created when that phase is implemented.
 | Phase | Scope | Status |
 |-------|-------|--------|
 | 1 | Inspection, architecture, folder structure, env config, PostgreSQL, Redis/Celery, health check | Done |
-| 2 | Auth (register, login, JWT refresh/blacklist, profile, password change), API conventions | Planned |
+| 2 | Auth (register, login, JWT refresh/blacklist, profile, password change), API conventions, research project workspaces | Done |
 | 3 | React app shell: dark theme, sidebar, routing, protected routes, auth UI, dashboard | Planned |
 | 4 | PDF upload and validation, PyMuPDF extraction, metadata, projects, processing status (Celery) | Planned |
 | 5 | Ollama inference layer, research chat with history, streaming, markdown | Planned |

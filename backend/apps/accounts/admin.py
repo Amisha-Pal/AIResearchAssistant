@@ -1,6 +1,12 @@
 from django.contrib import admin
-from django.contrib.auth.admin import UserAdmin
+from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
 from .models import User
 
-admin.site.register(User, UserAdmin)
+
+@admin.register(User)
+class UserAdmin(BaseUserAdmin):
+    fieldsets = BaseUserAdmin.fieldsets + (
+        ("Research profile", {"fields": ("affiliation", "bio", "research_interests")}),
+    )
+    list_display = ("username", "email", "first_name", "last_name", "affiliation", "is_staff")

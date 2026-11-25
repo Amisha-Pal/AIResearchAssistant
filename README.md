@@ -100,6 +100,24 @@ npm run dev                  # http://localhost:5173 (proxies /api to http://loc
 | `http://localhost:8000/api/docs/` | Swagger UI (OpenAPI schema at `/api/schema/`) |
 | `http://localhost:8000/admin/` | Django admin |
 
+## API overview (v1)
+
+All endpoints except register, login, refresh and health need `Authorization: Bearer <access token>`.
+Errors always use `{"error": {"status", "code", "message", "fields"?}}`.
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/api/v1/auth/register/` | Create an account; returns `access`, `refresh`, `user` |
+| POST | `/api/v1/auth/login/` | Log in with username **or** email |
+| POST | `/api/v1/auth/refresh/` | Rotate the refresh token (old one is blacklisted) |
+| POST | `/api/v1/auth/logout/` | Blacklist the given refresh token |
+| GET/PATCH | `/api/v1/auth/me/` | View or edit profile (affiliation, bio, research interests) |
+| POST | `/api/v1/auth/password/change/` | Change password; revokes all other sessions and returns new tokens |
+| GET/POST | `/api/v1/projects/` | List (`?search=`, `?status=`, `?ordering=`, `?page=`) or create research projects |
+| GET/PATCH/DELETE | `/api/v1/projects/<id>/` | Manage one of your own projects |
+
+Auth endpoints are rate limited (`API_THROTTLE_AUTH`, default `10/min`).
+
 ## Tests and checks
 
 ```bash

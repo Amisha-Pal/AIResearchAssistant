@@ -10,6 +10,6 @@ class UserAdmin(BaseUserAdmin):
         ("Research profile", {"fields": ("affiliation", "bio", "research_interests")}),
     )
     add_fieldsets = (
-        (None, {"classes": ("wide",), "fields": ("username", "email", "password1", "password2")}),
+        (None, {"classes": ("wide",), "fields": ("username", "email", "usable_password", "password1", "password2")}),
     )
     list_display = ("username", "email", "first_name", "last_name", "affiliation", "is_staff")

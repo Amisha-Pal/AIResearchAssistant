@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     # Third party
     "rest_framework",
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "drf_spectacular",
     # Local
@@ -151,31 +152,71 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",)
     + (("rest_framework.renderers.BrowsableAPIRenderer",) if DEBUG else ()),
-    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "DEFAULT_PAGINATION_CLASS": "apps.core.pagination.StandardPagination",
     "PAGE_SIZE": 20,
+    "DEFAULT_FILTER_BACKENDS": (
+        "rest_framework.filters.SearchFilter",
+        "rest_framework.filters.OrderingFilter",
+    ),
+    "EXCEPTION_HANDLER": "apps.core.exceptions.api_exception_handler",
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_THROTTLE_CLASSES": (
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
     ),
+    # Trust X-Forwarded-For only when this many reverse proxies sit in front of Django.
+    "NUM_PROXIES": env_int("API_NUM_PROXIES", 0),
     "DEFAULT_THROTTLE_RATES": {
         "anon": env_str("API_THROTTLE_ANON", "60/min"),
         "user": env_str("API_THROTTLE_USER", "600/min"),
+        "auth": env_str("API_THROTTLE_AUTH", "10/min"),
     },
 }
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=env_int("JWT_ACCESS_MINUTES", 30)),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=env_int("JWT_ACCESS_MINUTES", 15)),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=env_int("JWT_REFRESH_DAYS", 7)),
     "AUTH_HEADER_TYPES": ("Bearer",),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
     "UPDATE_LAST_LOGIN": True,
+    # Embeds a hash of the password hash in every token; any password change invalidates them.
+    "CHECK_REVOKE_TOKEN": True,
 }
+
+# The browser app keeps the access token in memory only; the refresh token lives in this
+# httpOnly cookie, scoped to the auth endpoints so it is never sent with other requests.
+AUTH_REFRESH_COOKIE = {
+    "NAME": env_str("AUTH_REFRESH_COOKIE_NAME", "refresh_token"),
+    "PATH": "/api/v1/auth/",
+    "SECURE": env_bool("AUTH_REFRESH_COOKIE_SECURE", not DEBUG),
+    "SAMESITE": env_str("AUTH_REFRESH_COOKIE_SAMESITE", "Strict"),
+}
+
+# ---------------------------------------------------------------------------
+# Email and password reset
+# ---------------------------------------------------------------------------
+
+# Development default prints emails to the runserver console. Set SMTP values in .env to send real mail.
+EMAIL_BACKEND = env_str("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
+EMAIL_HOST = env_str("EMAIL_HOST", "localhost")
+EMAIL_PORT = env_int("EMAIL_PORT", 587)
+EMAIL_HOST_USER = env_str("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = env_str("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
+EMAIL_TIMEOUT = env_int("EMAIL_TIMEOUT", 10)
+DEFAULT_FROM_EMAIL = env_str("DEFAULT_FROM_EMAIL", "AI Research Assistant <no-reply@localhost>")
+
+# Base URL of the React app, used to build password-reset links.
+FRONTEND_URL = env_str("FRONTEND_URL", "http://localhost:5173")
+PASSWORD_RESET_TIMEOUT = env_int("PASSWORD_RESET_TIMEOUT_SECONDS", 60 * 60)
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "AI Research Assistant API",
     "DESCRIPTION": "REST API for the local-first AI Research Assistant.",
     "VERSION": "0.1.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    "COMPONENT_SPLIT_REQUEST": True,
 }
 
 # ---------------------------------------------------------------------------
@@ -185,7 +226,8 @@ SPECTACULAR_SETTINGS = {
 CORS_ALLOWED_ORIGINS = env_list(
     "CORS_ALLOWED_ORIGINS", ["http://localhost:5173", "http://127.0.0.1:5173"]
 )
-CORS_ALLOW_CREDENTIALS = False
+# Credentials are needed for the httpOnly refresh cookie; origins are an explicit allow-list.
+CORS_ALLOW_CREDENTIALS = True
 
 # ---------------------------------------------------------------------------
 # Static, media and uploads

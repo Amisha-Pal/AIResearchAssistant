@@ -8,8 +8,14 @@ function firstMessage(value) {
  * Normalise an Axios error from the backend's `{"error": {...}}` envelope into
  * `{ message, fields }`, where `fields` maps field names to one message each.
  */
+/** True when the API could not be reached (network failure, or a gateway/dev proxy with the backend down). */
+export function isServerUnreachable(error) {
+  if (!error?.response) return true
+  return [502, 503, 504].includes(error.response.status) && !error.response.data?.error
+}
+
 export function parseApiError(error, fallback = 'Something went wrong. Please try again.') {
-  if (!error?.response) {
+  if (isServerUnreachable(error)) {
     return {
       message: 'Cannot reach the server. Check that the backend is running and try again.',
       fields: {},

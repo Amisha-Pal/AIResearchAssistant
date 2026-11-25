@@ -13,7 +13,8 @@ export function ProtectedRoute() {
 
 export function PublicOnlyRoute() {
   const { status } = useAuth()
+  const location = useLocation()
   if (status === 'loading') return <FullPageLoader />
-  if (status === 'authenticated') return <Navigate to="/dashboard" replace />
+  if (status === 'authenticated') return <Navigate to={location.state?.from?.pathname || '/dashboard'} replace />
   return <Outlet />
 }

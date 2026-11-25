@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { authApi } from '../api/auth'
+import { isServerUnreachable } from '../api/errors'
 import { refreshAccessToken, setSessionExpiredHandler, tokenStore } from '../api/client'
 import { AuthContext } from './auth-context'
 
@@ -57,8 +58,9 @@ export function AuthProvider({ children }) {
   const logout = useCallback(async () => {
     try {
       await authApi.logout()
-    } catch {
-      // The local session is cleared regardless; an expired token cannot be used anyway.
+    } catch (error) {
+      // Only a server-side revocation ends the session; a rejected (4xx) token is already unusable.
+      if (isServerUnreachable(error) || error.response.status >= 500) throw error
     }
     endSession()
   }, [endSession])

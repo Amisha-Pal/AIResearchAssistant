@@ -2,7 +2,9 @@ import { BrainCircuit, LayoutDashboard, LogOut, Menu, UserRound, X } from 'lucid
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 
+import { parseApiError } from '../../api/errors'
 import { useAuth } from '../../auth/useAuth'
+import { Alert } from '../ui/Alert'
 import { Button } from '../ui/Button'
 
 const NAV = [
@@ -15,11 +17,18 @@ export function AppLayout() {
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
+  const [logoutError, setLogoutError] = useState('')
 
   async function handleLogout() {
     setLoggingOut(true)
-    await logout()
-    navigate('/login', { replace: true })
+    setLogoutError('')
+    try {
+      await logout()
+      navigate('/login', { replace: true })
+    } catch (error) {
+      setLogoutError(`${parseApiError(error).message} You are still signed in.`)
+      setLoggingOut(false)
+    }
   }
 
   const displayName = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || user?.username
@@ -66,6 +75,7 @@ export function AppLayout() {
               <small>{user?.email}</small>
             </span>
           </div>
+          <Alert type="error">{logoutError}</Alert>
           <Button variant="ghost" onClick={handleLogout} loading={loggingOut} className="btn-block">
             <LogOut size={16} aria-hidden="true" /> Log out
           </Button>

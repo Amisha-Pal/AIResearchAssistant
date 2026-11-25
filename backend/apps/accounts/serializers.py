@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
@@ -11,6 +12,14 @@ User = get_user_model()
 
 MAX_INTERESTS = 20
 MAX_INTEREST_LENGTH = 60
+
+
+def _validate_password_field(field, password, user):
+    """Run Django's password validators, reporting failures on ``field`` instead of non_field_errors."""
+    try:
+        validate_password(password, user=user)
+    except DjangoValidationError as exc:
+        raise serializers.ValidationError({field: list(exc.messages)}) from exc
 
 
 def _validate_unique_email(email, exclude_pk=None):
@@ -92,7 +101,7 @@ class RegisterSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"password_confirm": "Passwords do not match."})
         candidate = User(username=attrs.get("username"), email=attrs.get("email"),
                          first_name=attrs.get("first_name", ""), last_name=attrs.get("last_name", ""))
-        validate_password(attrs["password"], user=candidate)
+        _validate_password_field("password", attrs["password"], candidate)
         return attrs
 
     def create(self, validated_data):
@@ -160,7 +169,7 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
             raise serializers.ValidationError({"token": "This reset link is invalid or has expired."})
         if attrs["new_password"] != attrs["new_password_confirm"]:
             raise serializers.ValidationError({"new_password_confirm": "Passwords do not match."})
-        validate_password(attrs["new_password"], user=user)
+        _validate_password_field("new_password", attrs["new_password"], user)
         attrs["user"] = user
         return attrs
 
@@ -180,7 +189,7 @@ class ChangePasswordSerializer(serializers.Serializer):
             raise serializers.ValidationError({"new_password_confirm": "Passwords do not match."})
         if attrs["new_password"] == attrs["current_password"]:
             raise serializers.ValidationError({"new_password": "New password must differ from the current one."})
-        validate_password(attrs["new_password"], user=self.context["request"].user)
+        _validate_password_field("new_password", attrs["new_password"], self.context["request"].user)
         return attrs
 
 

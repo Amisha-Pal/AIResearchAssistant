@@ -133,12 +133,25 @@ class RegisterTests(IsolatedAPITestCase):
     def test_weak_password_rejected(self):
         response = self.client.post(self.url, self.payload(password="12345678", password_confirm="12345678"), format="json")
         self.assertEqual(response.status_code, 400)
-        self.assertIn("non_field_errors", response.json()["error"]["fields"])
+        self.assertIn("password", response.json()["error"]["fields"])
 
     def test_missing_fields(self):
         response = self.client.post(self.url, {}, format="json")
         self.assertEqual(response.status_code, 400)
         self.assertTrue({"username", "email", "password"} <= set(response.json()["error"]["fields"]))
+
+
+class PasswordStrengthFieldErrorTests(IsolatedAPITestCase):
+    def test_weak_and_similar_passwords_reported_on_password_field(self):
+        for password in ("password", "adalovelace1"):
+            response = self.client.post(
+                reverse("auth-register"),
+                {"username": "adalovelace1", "email": "ada@example.com", "password": password,
+                 "password_confirm": password},
+                format="json",
+            )
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("password", response.json()["error"]["fields"], response.content)
 
 
 class LoginRefreshLogoutTests(IsolatedAPITestCase):

@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Django local data
+*.sqlite3
+backend/media/
+backend/staticfiles/
+backend/logs/
+
+# AI artifacts (vector indexes, checkpoints, downloaded models)
+backend/data/
+*.faiss
+*.pt
+*.pth
+*.safetensors
+
+# Node
+node_modules/
+dist/
+
+# Editors / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db

@@ -97,6 +97,6 @@ class ChangePasswordView(AuthThrottleMixin, APIView):
         serializer.is_valid(raise_exception=True)
         user = request.user
         user.set_password(serializer.validated_data["new_password"])
-        user.save(update_fields=["password"])
+        user.save(update_fields=["password", "tokens_valid_after"])
         revoke_all_refresh_tokens(user)
         return Response({**issue_tokens(user), "user": UserSerializer(user).data})

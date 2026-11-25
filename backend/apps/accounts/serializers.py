@@ -39,6 +39,15 @@ class UserSerializer(serializers.ModelSerializer):
     def validate_email(self, value):
         return _validate_unique_email(value, exclude_pk=self.instance.pk if self.instance else None)
 
+    def update(self, instance, validated_data):
+        # Save only the edited columns so a stale request.user cannot overwrite
+        # a concurrent password change or deactivation.
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+        if validated_data:
+            instance.save(update_fields=list(validated_data))
+        return instance
+
     def validate_research_interests(self, value):
         if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
             raise serializers.ValidationError("Must be a list of strings.")
@@ -68,6 +77,12 @@ class RegisterSerializer(serializers.ModelSerializer):
     def validate_email(self, value):
         return _validate_unique_email(value)
 
+    def validate_username(self, value):
+        value = User.normalize_username(value)
+        if User.objects.filter(username=value).exists():
+            raise serializers.ValidationError("A user with that username already exists.")
+        return value
+
     def validate(self, attrs):
         if attrs["password"] != attrs.pop("password_confirm"):
             raise serializers.ValidationError({"password_confirm": "Passwords do not match."})
@@ -86,8 +101,8 @@ class LoginSerializer(TokenObtainPairSerializer):
     default_error_messages = {"no_active_account": "Invalid username/email or password."}
 
     def validate(self, attrs):
-        identifier = attrs.get(self.username_field, "").strip()
-        if "@" in identifier:
+        identifier = User.normalize_username(attrs.get(self.username_field, "").strip())
+        if "@" in identifier and not User.objects.filter(username=identifier).exists():
             user = User.objects.filter(email__iexact=identifier).only("username").first()
             if user is not None:
                 identifier = user.username

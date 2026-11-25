@@ -1,13 +1,19 @@
 from unittest import mock
 
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError
+from django.utils import timezone
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
 
 from apps.core.testing import IsolatedAPITestCase
+
+from .serializers import UserSerializer
 
 User = get_user_model()
 PASSWORD = "s3cure-Passw0rd!"
@@ -27,6 +33,22 @@ class UserModelTests(TestCase):
         self.assertEqual(user.email, "ada@example.com")
         with self.assertRaises(IntegrityError):
             User.objects.create_user("grace", "ADA@example.com", PASSWORD)
+
+
+    def test_full_clean_catches_case_only_email_duplicate(self):
+        User.objects.create_user("ada", "ada@example.com", PASSWORD)
+        other = User(username="grace", email="ADA@Example.com")
+        other.set_password(PASSWORD)
+        with self.assertRaises(ValidationError) as ctx:
+            other.full_clean()
+        self.assertIn("email", ctx.exception.message_dict)
+
+    def test_null_research_interests_saved_as_empty_list(self):
+        user = User.objects.create_user("ada", "ada@example.com", PASSWORD)
+        user.research_interests = None
+        user.save()
+        user.refresh_from_db()
+        self.assertEqual(user.research_interests, [])
 
 
 class RegisterTests(IsolatedAPITestCase):
@@ -61,6 +83,19 @@ class RegisterTests(IsolatedAPITestCase):
         error = response.json()["error"]
         self.assertEqual(error["code"], "validation_error")
         self.assertIn("email", error["fields"])
+
+    def test_username_is_unicode_normalized(self):
+        User.objects.create_user("fiona", "fiona@example.com", PASSWORD)
+        response = self.client.post(self.url, self.payload(username="\ufb01ona"), format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("username", response.json()["error"]["fields"])
+
+    def test_login_with_unnormalized_username_spelling(self):
+        self.assertEqual(self.client.post(self.url, self.payload(username="\ufb01ona"), format="json").status_code, 201)
+        response = self.client.post(
+            reverse("auth-login"), {"username": "\ufb01ona", "password": PASSWORD}, format="json"
+        )
+        self.assertEqual(response.status_code, 200, response.content)
 
     def test_password_mismatch(self):
         response = self.client.post(self.url, self.payload(password_confirm="different-Passw0rd"), format="json")
@@ -140,6 +175,25 @@ class LoginRefreshLogoutTests(IsolatedAPITestCase):
         response = self.client.post(reverse("auth-logout"), {"refresh": "garbage"}, format="json")
         self.assertEqual(response.status_code, 400)
 
+    def test_username_containing_at_wins_over_other_users_email(self):
+        User.objects.create_user("ada@example.com", "someone@example.com", "Other-pass-123!")
+        response = self.login("ada@example.com", "Other-pass-123!")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["user"]["email"], "someone@example.com")
+
+    @mock.patch.object(ScopedRateThrottle, "THROTTLE_RATES", {"auth": "3/min"})
+    def test_throttle_ignores_spoofed_forwarded_for(self):
+        codes = [
+            self.client.post(
+                reverse("auth-login"),
+                {"username": "ada", "password": "wrong"},
+                format="json",
+                HTTP_X_FORWARDED_FOR=f"10.0.0.{i}",
+            ).status_code
+            for i in range(4)
+        ]
+        self.assertEqual(codes[3], 429)
+
     @mock.patch.object(ScopedRateThrottle, "THROTTLE_RATES", {"auth": "3/min"})
     def test_auth_endpoints_are_throttled(self):
         codes = [self.login("ada", "wrong").status_code for _ in range(4)]
@@ -185,6 +239,20 @@ class ProfileTests(IsolatedAPITestCase):
         self.client.force_authenticate(None)
         self.assertEqual(self.client.get(self.url).status_code, 401)
 
+    def test_profile_save_does_not_overwrite_concurrent_password_change(self):
+        stale = User.objects.get(pk=self.user.pk)
+        fresh = User.objects.get(pk=self.user.pk)
+        fresh.set_password("Changed-elsewhere-1")
+        fresh.is_active = False
+        fresh.save()
+        serializer = UserSerializer(stale, data={"bio": "hi"}, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        fresh.refresh_from_db()
+        self.assertEqual(fresh.bio, "hi")
+        self.assertFalse(fresh.is_active)
+        self.assertTrue(fresh.check_password("Changed-elsewhere-1"))
+
 
 class ChangePasswordTests(IsolatedAPITestCase):
     def setUp(self):
@@ -213,6 +281,20 @@ class ChangePasswordTests(IsolatedAPITestCase):
         self.assertEqual(old.status_code, 401)
         new = self.client.post(reverse("auth-refresh"), {"refresh": response.json()["refresh"]}, format="json")
         self.assertEqual(new.status_code, 200)
+
+    def test_password_change_revokes_old_access_tokens(self):
+        response = self.change()
+        self.assertEqual(response.status_code, 200, response.content)
+        # Simulate the old access token having been issued strictly before the change.
+        User.objects.filter(pk=self.user.pk).update(tokens_valid_after=timezone.now() + timedelta(seconds=5))
+        old = self.client.get(reverse("auth-me"))
+        self.assertEqual(old.status_code, 401)
+        self.assertEqual(old.json()["error"]["code"], "token_not_valid")
+
+    def test_new_access_token_works_after_password_change(self):
+        response = self.change()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.json()['access']}")
+        self.assertEqual(self.client.get(reverse("auth-me")).status_code, 200)
 
     def test_wrong_current_password(self):
         response = self.change(current="nope")

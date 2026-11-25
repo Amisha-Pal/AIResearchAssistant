@@ -147,7 +147,7 @@ CELERY_TASK_EAGER_PROPAGATES = True
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "apps.accounts.authentication.RevocableJWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",)
@@ -164,6 +164,8 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
     ),
+    # Trust X-Forwarded-For only when this many reverse proxies sit in front of Django.
+    "NUM_PROXIES": env_int("API_NUM_PROXIES", 0),
     "DEFAULT_THROTTLE_RATES": {
         "anon": env_str("API_THROTTLE_ANON", "60/min"),
         "user": env_str("API_THROTTLE_USER", "600/min"),

@@ -98,3 +98,11 @@ class ResearchProjectAPITests(IsolatedAPITestCase):
         response = self.client.get(self.list_url)
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json()["error"]["code"], "not_authenticated")
+
+
+class ResearchProjectModelTests(IsolatedAPITestCase):
+    def test_null_tags_saved_as_empty_list(self):
+        owner = User.objects.create_user("ada", "ada@example.com", "s3cure-Passw0rd!")
+        project = ResearchProject.objects.create(owner=owner, title="P", tags=None)
+        project.refresh_from_db()
+        self.assertEqual(project.tags, [])

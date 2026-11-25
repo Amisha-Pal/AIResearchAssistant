@@ -175,5 +175,4 @@ class PasswordResetConfirmView(AuthThrottleMixin, APIView):
             user.set_password(serializer.validated_data["new_password"])
             user.save(update_fields=["password"])
             revoke_all_refresh_tokens(user)
-        response = Response({"detail": "Your password has been reset. You can now log in."})
-        return clear_refresh_cookie(response)
+        return Response({"detail": "Your password has been reset. You can now log in."})

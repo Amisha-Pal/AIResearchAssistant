@@ -458,6 +458,14 @@ class PasswordResetTests(IsolatedAPITestCase):
         self.assertEqual(len(mail.outbox), 0)
 
 
+    def test_reset_keeps_another_accounts_refresh_cookie(self):
+        User.objects.create_user("grace", "grace@example.com", PASSWORD)
+        self.client.post(reverse("auth-login"), {"username": "grace", "password": PASSWORD}, format="json")
+        response = self.confirm(*self.link_parts())
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertNotIn(settings.AUTH_REFRESH_COOKIE["NAME"], response.cookies)
+
+
 class UnauthorizedAccessTests(IsolatedAPITestCase):
     def test_private_endpoints_require_auth(self):
         for name, method in [

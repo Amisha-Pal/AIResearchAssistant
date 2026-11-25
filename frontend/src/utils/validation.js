@@ -1,6 +1,9 @@
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 // Mirrors Django's UnicodeUsernameValidator: Unicode letters, digits and @ . + - _
-const USERNAME_RE = /^[\p{L}\p{M}\p{N}_.@+-]+$/u
+const USERNAME_RE = /^[\p{L}\p{N}_.@+-]+$/u
+
+/** Same normalisation as Django's `AbstractBaseUser.normalize_username`. */
+export const normalizeUsername = (value) => String(value ?? '').trim().normalize('NFKC')
 
 export const validators = {
   required: (value, label = 'This field') => (String(value ?? '').trim() ? '' : `${label} is required.`),
@@ -9,7 +12,7 @@ export const validators = {
     return EMAIL_RE.test(value.trim()) ? '' : 'Enter a valid email address.'
   },
   username: (value) => {
-    const v = String(value ?? '').trim()
+    const v = normalizeUsername(value)
     if (!v) return 'Username is required.'
     if (v.length > 150) return 'Username must be at most 150 characters.'
     return USERNAME_RE.test(v) ? '' : 'Use only letters, digits and the characters @ . + - _'

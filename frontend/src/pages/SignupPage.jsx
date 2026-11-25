@@ -8,7 +8,7 @@ import { Alert } from '../components/ui/Alert'
 import { Button } from '../components/ui/Button'
 import { PasswordField } from '../components/ui/PasswordField'
 import { TextField } from '../components/ui/TextField'
-import { PASSWORD_HINT, validate, validators } from '../utils/validation'
+import { normalizeUsername, PASSWORD_HINT, validate, validators } from '../utils/validation'
 
 const EMPTY = { username: '', email: '', first_name: '', last_name: '', password: '', password_confirm: '' }
 
@@ -40,7 +40,7 @@ export default function SignupPage() {
     try {
       await register({
         ...form,
-        username: form.username.trim(),
+        username: normalizeUsername(form.username),
         email: form.email.trim(),
         first_name: form.first_name.trim(),
         last_name: form.last_name.trim(),

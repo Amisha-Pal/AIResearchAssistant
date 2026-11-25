@@ -1,4 +1,5 @@
 from django.contrib.auth.models import AbstractUser
+from django.core.exceptions import ValidationError
 from django.db import models
 
 
@@ -20,6 +21,9 @@ class User(AbstractUser):
     def clean(self):
         super().clean()
         self.email = self.normalize_email_address(self.email)
+        interests = self.research_interests if self.research_interests is not None else []
+        if not isinstance(interests, list) or not all(isinstance(item, str) for item in interests):
+            raise ValidationError({"research_interests": 'Enter a JSON list of strings, e.g. ["NLP", "RAG"].'})
 
     def save(self, *args, **kwargs):
         self.email = self.normalize_email_address(self.email)

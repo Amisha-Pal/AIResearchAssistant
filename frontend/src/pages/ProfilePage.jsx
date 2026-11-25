@@ -8,6 +8,7 @@ import { Alert } from '../components/ui/Alert'
 import { Button } from '../components/ui/Button'
 import { PasswordField } from '../components/ui/PasswordField'
 import { TextField } from '../components/ui/TextField'
+import { interestsOf } from '../utils/profile'
 import { PASSWORD_HINT, validate, validators } from '../utils/validation'
 
 const toForm = (user) => ({
@@ -16,7 +17,7 @@ const toForm = (user) => ({
   email: user.email || '',
   affiliation: user.affiliation || '',
   bio: user.bio || '',
-  research_interests: (user.research_interests || []).join(', '),
+  research_interests: interestsOf(user).join(', '),
 })
 
 const parseInterests = (text) =>

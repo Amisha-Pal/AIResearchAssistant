@@ -8,7 +8,6 @@ from django.contrib.auth.tokens import default_token_generator
 from django.core import mail
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
-from django.utils import timezone
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 from django.test import TestCase
@@ -55,6 +54,15 @@ class UserModelTests(TestCase):
         user.save()
         user.refresh_from_db()
         self.assertEqual(user.research_interests, [])
+
+
+class ResearchInterestsValidationTests(TestCase):
+    def test_clean_rejects_non_list_interests(self):
+        user = User(username="ada", email="ada@example.com", research_interests="NLP")
+        with self.assertRaises(ValidationError):
+            user.full_clean(exclude=["password"])
+        user.research_interests = ["NLP", "RAG"]
+        user.full_clean(exclude=["password"])
 
 
 class RegisterTests(IsolatedAPITestCase):

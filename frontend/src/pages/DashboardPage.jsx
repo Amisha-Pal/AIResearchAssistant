@@ -8,6 +8,7 @@ import { useAuth } from '../auth/useAuth'
 import { Alert } from '../components/ui/Alert'
 import { Button } from '../components/ui/Button'
 import { Spinner } from '../components/ui/Spinner'
+import { interestsOf } from '../utils/profile'
 
 function RecentProjects() {
   const [state, setState] = useState({ status: 'loading', data: null, error: '' })
@@ -68,7 +69,7 @@ function RecentProjects() {
 export default function DashboardPage() {
   const { user } = useAuth()
   const name = user.first_name || user.username
-  const interests = user.research_interests || []
+  const interests = interestsOf(user)
 
   return (
     <div className="page">

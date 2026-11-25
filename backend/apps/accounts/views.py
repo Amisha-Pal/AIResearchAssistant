@@ -1,4 +1,6 @@
 from django.contrib.auth import get_user_model
+from django.contrib.auth.tokens import default_token_generator
+from django.db import transaction
 from drf_spectacular.utils import extend_schema
 from rest_framework import generics, serializers, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -165,9 +167,13 @@ class PasswordResetConfirmView(AuthThrottleMixin, APIView):
     def post(self, request):
         serializer = PasswordResetConfirmSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = serializer.validated_data["user"]
-        user.set_password(serializer.validated_data["new_password"])
-        user.save(update_fields=["password"])
-        revoke_all_refresh_tokens(user)
+        with transaction.atomic():
+            # Lock the row and re-check the token so concurrent uses of one link cannot both succeed.
+            user = User.objects.select_for_update().get(pk=serializer.validated_data["user"].pk)
+            if not default_token_generator.check_token(user, serializer.validated_data["token"]):
+                raise serializers.ValidationError({"token": "This reset link is invalid or has expired."})
+            user.set_password(serializer.validated_data["new_password"])
+            user.save(update_fields=["password"])
+            revoke_all_refresh_tokens(user)
         response = Response({"detail": "Your password has been reset. You can now log in."})
         return clear_refresh_cookie(response)

@@ -1,5 +1,6 @@
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-const USERNAME_RE = /^[\w.@+-]+$/
+// Mirrors Django's UnicodeUsernameValidator: Unicode letters, digits and @ . + - _
+const USERNAME_RE = /^[\p{L}\p{M}\p{N}_.@+-]+$/u
 
 export const validators = {
   required: (value, label = 'This field') => (String(value ?? '').trim() ? '' : `${label} is required.`),
@@ -11,7 +12,7 @@ export const validators = {
     const v = String(value ?? '').trim()
     if (!v) return 'Username is required.'
     if (v.length > 150) return 'Username must be at most 150 characters.'
-    return USERNAME_RE.test(v) ? '' : 'Use only letters, digits and @ . + - _ characters.'
+    return USERNAME_RE.test(v) ? '' : 'Use only letters, digits and the characters @ . + - _'
   },
   password: (value) => {
     if (!value) return 'Password is required.'

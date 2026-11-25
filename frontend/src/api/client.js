@@ -36,12 +36,29 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-/** Exchange the refresh cookie for a new access token. Concurrent callers share one request. */
+function tokenUserId(token) {
+  try {
+    const payload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
+    return String(JSON.parse(atob(payload)).user_id)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Exchange the refresh cookie for a new access token. Concurrent callers share one request.
+ * Rejects if the cookie now belongs to a different account (e.g. after signing in as someone
+ * else in another tab), so requests made for one user are never replayed as another.
+ */
 export function refreshAccessToken() {
   if (!refreshPromise) {
+    const expectedUserId = accessToken ? tokenUserId(accessToken) : null
     refreshPromise = api
       .post('/auth/refresh/', {}, { skipAuth: true, skipRefresh: true })
       .then(({ data }) => {
+        if (expectedUserId && tokenUserId(data.access) !== expectedUserId) {
+          throw new Error('The session now belongs to a different account.')
+        }
         accessToken = data.access
         return data.access
       })

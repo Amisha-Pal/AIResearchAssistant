@@ -107,6 +107,7 @@ npm run dev                  # http://localhost:5173 (proxies /api to http://loc
 - **Access token** (JWT, 15 minutes): sent as `Authorization: Bearer <access>`. The web app keeps it **in memory only**, never in `localStorage` or in URLs.
 - **Refresh token** (JWT, 7 days): set by the backend as an **httpOnly, SameSite=Strict** cookie scoped to `/api/v1/auth/` (and `Secure` when `DJANGO_DEBUG=False`). It is also returned in the JSON body for non-browser API clients.
 - Every refresh **rotates** the refresh token and blacklists the old one. Logout blacklists it and clears the cookie.
+- Auth endpoints accept **JSON bodies only** (`415` otherwise). Cross-site HTML forms cannot send JSON, so another site cannot silently log your browser into a different account.
 - Changing or resetting the password **revokes every session**: outstanding refresh tokens are blacklisted, and access tokens issued before the change are rejected.
 - The frontend Axios client (`frontend/src/api/client.js`) retries a request once after a `401` by calling `/auth/refresh/`. If the refresh fails, the user is sent to the login page with a "session expired" message. On page reload the session is restored from the cookie.
 - Auth endpoints are rate limited (`API_THROTTLE_AUTH`, default `10/min` per client IP).

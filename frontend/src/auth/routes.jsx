@@ -4,10 +4,12 @@ import { FullPageLoader } from '../components/ui/Spinner'
 import { useAuth } from './useAuth'
 
 export function ProtectedRoute() {
-  const { status } = useAuth()
+  const { status, loggedOut } = useAuth()
   const location = useLocation()
   if (status === 'loading') return <FullPageLoader />
-  if (status !== 'authenticated') return <Navigate to="/login" replace state={{ from: location }} />
+  if (status !== 'authenticated') {
+    return <Navigate to="/login" replace state={loggedOut ? undefined : { from: location }} />
+  }
   return <Outlet />
 }
 

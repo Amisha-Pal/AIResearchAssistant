@@ -9,12 +9,15 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [status, setStatus] = useState('loading') // loading | authenticated | anonymous
   const [notice, setNotice] = useState('')
+  // True after an explicit logout, so the next login goes to the dashboard, not the last page.
+  const [loggedOut, setLoggedOut] = useState(false)
 
   const startSession = useCallback((data) => {
     tokenStore.set(data.access)
     setUser(data.user)
     setStatus('authenticated')
     setNotice('')
+    setLoggedOut(false)
   }, [])
 
   const endSession = useCallback((message = '') => {
@@ -62,6 +65,7 @@ export function AuthProvider({ children }) {
       // Only a server-side revocation ends the session; a rejected (4xx) token is already unusable.
       if (isServerUnreachable(error) || error.response.status >= 500) throw error
     }
+    setLoggedOut(true)
     endSession()
   }, [endSession])
 
@@ -76,6 +80,7 @@ export function AuthProvider({ children }) {
       status,
       isAuthenticated: status === 'authenticated',
       notice,
+      loggedOut,
       clearNotice: () => setNotice(''),
       login,
       register,
@@ -83,7 +88,7 @@ export function AuthProvider({ children }) {
       changePassword,
       setUser,
     }),
-    [user, status, notice, login, register, logout, changePassword],
+    [user, status, notice, loggedOut, login, register, logout, changePassword],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
